@@ -166,14 +166,16 @@ export class EVMExecutor {
       const opcode = this.opcodes.get(frame.code[frame.pc]);
       if (!opcode) throw new Error(`Invalid opcode: ${frame.code[frame.pc].toString(16)}`);
 
-      // console.log(
-      //   "depth:",
-      //   frame.depth + 1,
-      //   frame.pc.toString(10),
-      //   ":",
-      //   opcode.name,
-      //   frame.stack.map((n) => n.toString(16))
-      // );
+      console.log(
+        "depth:",
+        frame.depth + 1,
+        frame.pc.toString(10),
+        ":",
+        opcode.name,
+        "[",
+        frame.stack.map((n) => n.toString(16)).join(","),
+        "]"
+      );
       const context = this._createContext(frame);
       const interacted = await opcode.execute(context, this.loader);
 
@@ -184,7 +186,7 @@ export class EVMExecutor {
       this.storage.set(frame.to, interacted.storage);
 
       if (interacted.call && interacted.call.type === "call") {
-        if (frame.type === "staticcall") throw new Error("Cannot call in staticcall");
+        // if (frame.type === "staticcall") throw new Error("Cannot call in staticcall");
         const call = interacted.call;
         const code = await this.getCode(interacted.call.to);
         const transaction = {
@@ -208,7 +210,7 @@ export class EVMExecutor {
       }
 
       if (interacted.call && interacted.call.type === "creation") {
-        if (frame.type === "staticcall") throw new Error("Cannot create contract in staticcall");
+        // if (frame.type === "staticcall") throw new Error("Cannot create contract in staticcall");
         const call = interacted.call;
         const initCodeEnd = call.calldata.findIndex((b) => b === 0xf3);
         const initCode = call.calldata.slice(0, initCodeEnd + 1);
@@ -229,10 +231,9 @@ export class EVMExecutor {
       }
 
       if (interacted.call && interacted.call.type === "delegatecall") {
-        if (frame.type === "staticcall") throw new Error("Cannot delegatecall in staticcall");
+        // if (frame.type === "staticcall") throw new Error("Cannot delegatecall in staticcall");
         const call = interacted.call;
         const code = await this.getCode(call.to);
-        console.log(call.to.toString(16));
         const transaction = {
           ...{ from: frame.from, to: frame.to, value: call.value, calldata: call.calldata },
           nonce: await this.getTransactionCount(frame.to),
@@ -242,6 +243,7 @@ export class EVMExecutor {
           code: code,
           depth: frame.depth + 1,
         });
+        // console.log(call, childFrame);
         const childResult = await this._executeFrame(childFrame);
         frame.stack.push(childResult.revert ? 0n : 1n); // set success flag
         frame.returnedData = childResult.return;
@@ -253,7 +255,7 @@ export class EVMExecutor {
           );
       }
 
-      if (interacted.call && interacted.type === "staticcall") {
+      if (interacted.call && interacted.call.type === "staticcall") {
         const call = interacted.call;
         const code = await this.getCode(interacted.call.to);
         const transaction = {
@@ -265,8 +267,10 @@ export class EVMExecutor {
           code: code,
           depth: frame.depth + 1,
         });
+
         const subFrameStorageSnapshot = this._cloneStorage(frame.to);
         const childResult = await this._executeFrame(childFrame);
+
         const isStorageUnchanged = Array.from(subFrameStorageSnapshot).every(([k, v]) => {
           const value = this.storage.get(frame.to)?.get(k);
           return value === v;
@@ -285,7 +289,7 @@ export class EVMExecutor {
 
       if (interacted.log) {
         console.log("log:", frame.to.toString(16), ":");
-        console.log(interacted.log);
+        // console.log(interacted.log);
       }
 
       if (interacted.revert) {

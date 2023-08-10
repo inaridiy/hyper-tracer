@@ -5,6 +5,14 @@ export const concatBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
 
   return result;
 };
+export const sliceBytes = (target: Uint8Array, start: number, end: number): Uint8Array => {
+  const sliced = target.slice(start, end);
+  const result = new Uint8Array(end - start);
+
+  result.set(sliced);
+
+  return result;
+};
 
 export const insertIntoArray = (target: Uint8Array, offset: number, dataToInsert: Uint8Array): Uint8Array => {
   const requiredLength = offset + dataToInsert.length;

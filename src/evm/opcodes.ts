@@ -1,6 +1,6 @@
 import { keccak256 } from "viem";
 import { TWO_256 } from "../constants";
-import { bigIntToUint8Array, insertIntoArray } from "../utils/bytes";
+import { bigIntToUint8Array, insertIntoArray, sliceBytes } from "../utils/bytes";
 import { hexToUint8Array, uint8ArrayToBigint } from "../utils/converter";
 import { ethMod, fastPow, i256Div, i256Mod, i256Tou256, mod, signExtend } from "../utils/math";
 import { Loader } from "./loader";
@@ -14,6 +14,16 @@ export abstract class OPCode {
 
   toString() {
     return this.name;
+  }
+}
+
+export class STOP extends OPCode {
+  constructor() {
+    super(0x0n, "STOP");
+  }
+
+  execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
+    return Promise.resolve({ ...ctx, pc: ctx.pc + 1, return: new Uint8Array() });
   }
 }
 
@@ -90,12 +100,12 @@ export const SLT = twoArgsMathCodeGenerator(0x12n, "SLT", (a, b) => (i256Tou256(
 export const SGT = twoArgsMathCodeGenerator(0x13n, "SGT", (a, b) => (i256Tou256(a) > i256Tou256(b) ? 1n : 0n));
 export const EQ = twoArgsMathCodeGenerator(0x14n, "EQ", (a, b) => (a === b ? 1n : 0n));
 
-export const IZERO = oneArgMathCodeGenerator(0x15n, "IZERO", (a) => (a === 0n ? 1n : 0n));
+export const IZERO = oneArgMathCodeGenerator(0x15n, "ISZERO", (a) => (a === 0n ? 1n : 0n));
 
-export const AND = twoArgsMathCodeGenerator(0x16n, "AND", (a, b) => a & b);
-export const OR = twoArgsMathCodeGenerator(0x17n, "OR", (a, b) => a | b);
-export const XOR = twoArgsMathCodeGenerator(0x18n, "XOR", (a, b) => a ^ b);
-export const NOT = oneArgMathCodeGenerator(0x19n, "NOT", (a) => ~a);
+export const AND = twoArgsMathCodeGenerator(0x16n, "AND", (a, b) => ethMod(a & b));
+export const OR = twoArgsMathCodeGenerator(0x17n, "OR", (a, b) => ethMod(a | b));
+export const XOR = twoArgsMathCodeGenerator(0x18n, "XOR", (a, b) => ethMod(a ^ b));
+export const NOT = oneArgMathCodeGenerator(0x19n, "NOT", (a) => ethMod(~a));
 
 export const BYTE = twoArgsMathCodeGenerator(0x1an, "BYTE", (a, b) =>
   a >= 32n ? 0n : (b >> (8n * (31n - a))) & 0xffn
@@ -144,7 +154,7 @@ export class BALANCE extends OPCode {
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
     const address = ctx.stack.pop()!;
-    const balance = await loader.getBalance(ctx.blocknumber, address);
+    const balance = await loader.getBalance(ctx.blocknumber - 1n, address);
     ctx.stack.push(balance);
     return { ...ctx, pc: ctx.pc + 1 };
   }
@@ -190,7 +200,7 @@ export class CALLDATALOAD extends OPCode {
   execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
     const offset = ctx.stack.pop()!;
     const end = Number(offset) + 32;
-    const value = ctx.calldata.length > end ? ctx.calldata.slice(Number(offset), end) : new Uint8Array(32);
+    const value = sliceBytes(ctx.calldata, Number(offset), end);
     ctx.stack.push(uint8ArrayToBigint(value));
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
   }
@@ -212,16 +222,13 @@ export class CALLDATACOPY extends OPCode {
     super(0x37n, "CALLDATACOPY");
   }
 
-  execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
+  execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
     const destOffset = ctx.stack.pop()!;
     const offset = ctx.stack.pop()!;
     const size = ctx.stack.pop()!;
     const end = Number(offset) + Number(size);
 
-    const value =
-      end > ctx.calldata.length
-        ? ctx.calldata.slice(Number(offset), end)
-        : new Uint8Array(ctx.calldata.slice(Number(offset)), Number(size));
+    const value = sliceBytes(ctx.calldata, Number(offset), end);
 
     ctx.memory = insertIntoArray(ctx.memory, Number(destOffset), value);
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
@@ -251,10 +258,7 @@ export class CODECOPY extends OPCode {
     const size = ctx.stack.pop()!;
     const end = Number(offset) + Number(size);
 
-    const value =
-      end > ctx.code.length
-        ? ctx.code.slice(Number(offset), end)
-        : new Uint8Array(ctx.code.slice(Number(offset)), Number(size));
+    const value = sliceBytes(ctx.code, Number(offset), end);
 
     ctx.memory = insertIntoArray(ctx.memory, Number(destOffset), value);
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
@@ -278,7 +282,7 @@ export class EXTCODESIZE extends OPCode {
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
     const address = ctx.stack.pop()!;
-    const code = await loader.getCode(ctx.blocknumber, address);
+    const code = await loader.getCode(ctx.blocknumber - 1n, address);
     ctx.stack.push(BigInt(code.length));
     return { ...ctx, pc: ctx.pc + 1 };
   }
@@ -296,9 +300,8 @@ export class EXTCODECOPY extends OPCode {
     ];
     const end = Number(offset) + Number(size);
 
-    const code = await loader.getCode(ctx.blocknumber, address);
-    const value =
-      end > code.length ? code.slice(Number(offset), end) : new Uint8Array(code.slice(Number(offset)), Number(size));
+    const code = await loader.getCode(ctx.blocknumber - 1n, address);
+    const value = sliceBytes(code, Number(offset), end);
 
     ctx.memory = insertIntoArray(ctx.memory, Number(destOffset), value);
     return { ...ctx, pc: ctx.pc + 1 };
@@ -329,11 +332,7 @@ export class RETURNDATACOPY extends OPCode {
     const end = Number(offset) + Number(size);
 
     const value =
-      ctx.returnedData === undefined
-        ? new Uint8Array(0)
-        : end > ctx.returnedData.length
-        ? ctx.returnedData.slice(Number(offset), end)
-        : new Uint8Array(ctx.returnedData!.slice(Number(offset)), Number(size));
+      ctx.returnedData === undefined ? new Uint8Array(0) : sliceBytes(ctx.returnedData, Number(offset), end);
 
     ctx.memory = insertIntoArray(ctx.memory, Number(destOffset), value);
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
@@ -347,7 +346,7 @@ export class EXTCODEHASH extends OPCode {
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
     const address = ctx.stack.pop()!;
-    const code = await loader.getCode(ctx.blocknumber, address);
+    const code = await loader.getCode(ctx.blocknumber - 1n, address);
     ctx.stack.push(uint8ArrayToBigint(hexToUint8Array(keccak256(code))));
 
     return { ...ctx, pc: ctx.pc + 1 };
@@ -440,7 +439,7 @@ export class SELFBALANCE extends OPCode {
   }
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
-    const balance = await loader.getBalance(ctx.blocknumber, ctx.to);
+    const balance = await loader.getBalance(ctx.blocknumber - 1n, ctx.to);
     ctx.stack.push(balance);
     return { ...ctx, pc: ctx.pc + 1 };
   }
@@ -474,7 +473,7 @@ export class MLOAD extends OPCode {
 
   execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
     const offset = ctx.stack.pop()!;
-    const value = ctx.memory.slice(Number(offset), Number(offset) + 32);
+    const value = sliceBytes(ctx.memory, Number(offset), Number(offset) + 32);
     ctx.stack.push(uint8ArrayToBigint(value));
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
   }
@@ -515,7 +514,7 @@ export class SLOAD extends OPCode {
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
     const index = ctx.stack.pop()!;
-    const value = ctx.storage.get(index) || (await loader.getStorageAt(ctx.blocknumber, ctx.to, index));
+    const value = ctx.storage.get(index) || (await loader.getStorageAt(ctx.blocknumber - 1n, ctx.to, index));
     ctx.stack.push(value);
     return { ...ctx, pc: ctx.pc + 1 };
   }
@@ -587,7 +586,7 @@ export class GAS extends OPCode {
   }
 
   execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
-    ctx.stack.push(BigInt(0));
+    ctx.stack.push(BigInt(2n ** 256n - 1n));
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
   }
 }
@@ -737,7 +736,7 @@ export class DELEGATECALL extends OPCode {
 
     const calldata = ctx.memory.slice(Number(argsOffset), Number(argsOffset) + Number(argsSize));
     const [returnOffset, returnSize] = [Number(retOffset), Number(retSize)];
-    const call = { type: "delegatecall", to: address, value: 0n, calldata, returnOffset, returnSize } as const;
+    const call = { type: "delegatecall", to: address, value: ctx.value, calldata, returnOffset, returnSize } as const;
 
     return Promise.resolve({ ...ctx, pc: ctx.pc + 1, call });
   }

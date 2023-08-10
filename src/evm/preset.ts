@@ -49,9 +49,11 @@ import {
   REVERT,
   INVALID,
   SELFDESTRUCT,
+  STOP,
 } from "./opcodes";
 
 export const PRESET_OPCODES = [
+  new STOP(),
   ...COMMON_MATH_OPCODES,
   new ADDRESS(),
   new BALANCE(),
