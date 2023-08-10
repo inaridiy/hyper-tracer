@@ -150,6 +150,8 @@ export class EVMExecutor {
     let storageSnapshot: Storage = this._cloneStorage(frame.to);
     let balanceSnapshot: Map<Address, bigint> = this._cloneBalances();
 
+    if (10n >= _frame.to) throw new Error("PRECOMPILED NOT IMPLEMENTED");
+
     console.log(frame.type, ":", frame.to.toString(16), ":", uint8ArrayToHex(frame.calldata));
 
     if (frame.type === "call") {

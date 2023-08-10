@@ -52,6 +52,8 @@ export class JSONRpcLoader implements Loader {
   }
 
   async getCode(blocknumber: bigint, address: Address): Promise<Code> {
+    if (10n >= address) return Uint8Array.from([]);
+
     const res = await callJsonRpc(this.rpcUrl, "eth_getCode", [
       "0x" + address.toString(16).padStart(40, "0"),
       "0x" + blocknumber.toString(16),
