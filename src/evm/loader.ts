@@ -12,15 +12,28 @@ export interface Loader {
 }
 
 export class JSONRpcLoader implements Loader {
-  constructor(private rpcUrl: string) {}
+  cache: Record<string, Record<string, string>> = {};
+
+  constructor(private rpcUrl: string, cache?: Record<string, Record<string, string>>) {
+    if (cache) this.cache = cache;
+  }
+
+  async _callJsonRpc(method: string, params: any[]): Promise<any> {
+    const cache = this.cache[method] || (this.cache[method] = {});
+    const key = JSON.stringify(params);
+    if (cache[key]) return cache[key];
+    const res = await callJsonRpc(this.rpcUrl, method, params);
+    cache[key] = res;
+    return res;
+  }
 
   async getLatestBlockNumber(): Promise<bigint> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_blockNumber", []);
+    const res = await this._callJsonRpc("eth_blockNumber", []);
     return BigInt(res);
   }
 
   async getTransactionCount(blocknumber: bigint, address: Address): Promise<bigint> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_getTransactionCount", [
+    const res = await this._callJsonRpc("eth_getTransactionCount", [
       "0x" + address.toString(16).padStart(40, "0"),
       "0x" + blocknumber.toString(16),
     ]);
@@ -28,7 +41,7 @@ export class JSONRpcLoader implements Loader {
   }
 
   async getTransactionByHash(hash: bigint): Promise<Transaction & { blocknumber: bigint }> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_getTransactionByHash", ["0x" + hash.toString(16)]);
+    const res = await this._callJsonRpc("eth_getTransactionByHash", ["0x" + hash.toString(16)]);
     if (res === null) throw new Error("Transaction not found");
     return {
       from: BigInt(res.from),
@@ -41,7 +54,7 @@ export class JSONRpcLoader implements Loader {
   }
 
   async getBlock(blocknumber: bigint): Promise<Block | null> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_getBlockByNumber", ["0x" + blocknumber.toString(16), false]);
+    const res = await this._callJsonRpc("eth_getBlockByNumber", ["0x" + blocknumber.toString(16), false]);
     if (res === null) return null;
     return {
       number: BigInt(res.number),
@@ -54,7 +67,7 @@ export class JSONRpcLoader implements Loader {
   async getCode(blocknumber: bigint, address: Address): Promise<Code> {
     if (10n >= address) return Uint8Array.from([]);
 
-    const res = await callJsonRpc(this.rpcUrl, "eth_getCode", [
+    const res = await this._callJsonRpc("eth_getCode", [
       "0x" + address.toString(16).padStart(40, "0"),
       "0x" + blocknumber.toString(16),
     ]);
@@ -62,7 +75,7 @@ export class JSONRpcLoader implements Loader {
   }
 
   async getStorageAt(blocknumber: bigint, address: Address, index: bigint): Promise<bigint> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_getStorageAt", [
+    const res = await this._callJsonRpc("eth_getStorageAt", [
       "0x" + address.toString(16).padStart(40, "0"),
       "0x" + index.toString(16),
       "0x" + blocknumber.toString(16),
@@ -71,7 +84,7 @@ export class JSONRpcLoader implements Loader {
   }
 
   async getBalance(blocknumber: bigint, address: Address): Promise<bigint> {
-    const res = await callJsonRpc(this.rpcUrl, "eth_getBalance", [
+    const res = await this._callJsonRpc("eth_getBalance", [
       "0x" + address.toString(16).padStart(40, "0"),
       "0x" + blocknumber.toString(16),
     ]);

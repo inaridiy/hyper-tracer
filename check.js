@@ -68,7 +68,7 @@ while (hyperTrace.length > hyperIndex && castTrace.length > castIndex) {
     const stackDiffIndex = hyper.stack.findIndex((s, i) => s !== cast.stack[i]);
     console.log(stackDiffIndex);
 
-    if (hyper.op.includes("CALL")) continue;
+    if (hyper.op.includes("CALL") && stackDiffIndex === hyper.stack.length - 1) continue;
 
     if (skip === 0) break;
     skip--;

@@ -51,6 +51,7 @@ import {
   SELFDESTRUCT,
   STOP,
 } from "./opcodes";
+import { MEMCOPY } from "./precompiled";
 
 export const PRESET_OPCODES = [
   new STOP(),
@@ -107,3 +108,5 @@ export const PRESET_OPCODES = [
   new SELFDESTRUCT(),
   new RETURN(),
 ];
+
+export const PRESET_PRECOMPILED_CONTRACTS = [new MEMCOPY()];

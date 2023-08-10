@@ -5,7 +5,6 @@ import {
   ContractContext,
   Address,
   Code,
-  InteractedContext,
   VisualTransaction,
   Transaction,
   ExecutionResult,
@@ -13,15 +12,17 @@ import {
 } from "./types";
 import { EmptyLoader, JSONRpcLoader, Loader } from "./loader";
 import { insertIntoArray } from "../utils/bytes";
-import { PRESET_OPCODES } from "./preset";
+import { PRESET_OPCODES, PRESET_PRECOMPILED_CONTRACTS } from "./preset";
 import { OPCode } from "./opcodes";
 import { uint8ArrayToHex } from "../utils/converter";
+import { PrecompiledContracts } from "./precompiled";
 
 export interface EVMOpts {
   rpcUrl?: string;
   chainId?: bigint;
   blocknumber?: bigint;
   opcodes?: OPCode[];
+  precompiled?: PrecompiledContracts[];
   loader?: Loader;
   codes?: Map<Address, Code>;
   nonces?: Map<Address, bigint>;
@@ -37,6 +38,7 @@ export class EVMExecutor {
 
   private opcodes: Map<number, OPCode>; //<OPCode.code, OPCode>
   private codes: Map<Address, Code>; //<Address, Code>
+  private precompiled: Map<Address, PrecompiledContracts>; //<Address, PrecompiledContracts>
   private nonces: Map<Address, bigint>;
   private balances: Map<Address, bigint>;
   private storage: Map<Address, Storage>; //<Address, Storage>
@@ -44,21 +46,23 @@ export class EVMExecutor {
   constructor(options: EVMOpts) {
     this.chainId = options.chainId || 1n;
     this.blocknumber = options.blocknumber || 0n;
-    this.loader = options.loader || options.rpcUrl ? new JSONRpcLoader(options.rpcUrl!) : new EmptyLoader();
+    this.loader = options.loader || (options.rpcUrl ? new JSONRpcLoader(options.rpcUrl!) : new EmptyLoader());
     this.opcodes = new Map((options.opcodes || PRESET_OPCODES).map((op) => [Number(op.code), op]));
     this.codes = options.codes || new Map();
+    this.precompiled = new Map((options.precompiled || PRESET_PRECOMPILED_CONTRACTS).map((pre) => [pre.address, pre]));
     this.nonces = options.nonces || new Map();
     this.balances = options.balances || new Map();
     this.storage = options.storage || new Map();
   }
 
   async getCode(address: Address) {
+    if (10n >= address && !this.precompiled.has(address)) throw new Error("PRECOMPILED NOT IMPLEMENTED");
     const code = this.codes.get(address) || (await this.loader.getCode(this.blocknumber, address));
     return code;
   }
 
   async getBalance(address: Address) {
-    const balance = this.balances.get(address) || (await this.loader.getBalance(this.blocknumber, address));
+    const balance = this.balances.get(address) ?? (await this.loader.getBalance(this.blocknumber - 1n, address));
     return balance;
   }
 
@@ -150,18 +154,22 @@ export class EVMExecutor {
     let storageSnapshot: Storage = this._cloneStorage(frame.to);
     let balanceSnapshot: Map<Address, bigint> = this._cloneBalances();
 
-    if (10n >= _frame.to) throw new Error("PRECOMPILED NOT IMPLEMENTED");
-
-    console.log(frame.type, ":", frame.to.toString(16), ":", uint8ArrayToHex(frame.calldata));
+    console.log(frame.type, ":", frame.to.toString(16), ":", frame.value, uint8ArrayToHex(frame.calldata));
 
     if (frame.type === "call") {
       const oldFromBalance = await this.getBalance(frame.from);
       const oldToBalance = await this.getBalance(frame.to);
+      if (oldFromBalance - frame.value < 0n) {
+        console.log("Insufficient balance");
+        return { revert: new Uint8Array() };
+      }
       this._setBalance(frame.from, oldFromBalance - frame.value);
       this._setBalance(frame.to, oldToBalance + frame.value);
     }
 
-    if (frame.code.length === 0) return {};
+    const precompiled = this.precompiled.get(frame.to);
+    if (frame.code.length === 0 && !precompiled) return {};
+    if (precompiled) return await precompiled.call(await this._createContext(frame), this.loader);
 
     while (true) {
       if (frame.pc >= frame.code.length) throw new Error("Invalid pc");
@@ -296,6 +304,7 @@ export class EVMExecutor {
       }
 
       if (interacted.revert) {
+        console.log("revert:", frame.to.toString(16), ":");
         this.storage.set(frame.to, storageSnapshot);
         this.balances = balanceSnapshot;
         return { revert: interacted.revert };
