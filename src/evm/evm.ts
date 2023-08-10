@@ -108,6 +108,7 @@ export class EVMExecutor {
       ...others,
       blocknumber: this.blocknumber,
       codes: this.codes,
+      balances: this._cloneBalances(),
       storage: this.storage.get(frame.to) || new Map(),
     } satisfies ContractContext;
     return context;

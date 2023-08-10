@@ -54,6 +54,7 @@ export interface ContractContext extends Transaction {
   stack: Stack;
   calldata: Calldata;
   returnedData?: ReturnedData;
+  balances: Map<Address, bigint>;
   memory: Memory;
   storage: Storage;
 }

@@ -2,7 +2,7 @@ import { keccak256 } from "viem";
 import { TWO_256 } from "../constants";
 import { bigIntToUint8Array, insertIntoArray, sliceBytes } from "../utils/bytes";
 import { hexToUint8Array, uint8ArrayToBigint } from "../utils/converter";
-import { ethMod, fastPow, i256Div, i256Mod, i256Tou256, mod, signExtend } from "../utils/math";
+import { ethMod, fastPow, i256Div, i256Mod, i256ToBigint, mod, signExtend } from "../utils/math";
 import { Loader } from "./loader";
 import { ContractContext, InteractedContext } from "./types";
 import { calcContractAddress, calcCreate2Address } from "../utils/eth";
@@ -96,8 +96,8 @@ export const EXP = twoArgsMathCodeGenerator(0xan, "EXP", (a, b) => fastPow(a, b,
 export const SIGNEXTEND = twoArgsMathCodeGenerator(0xbn, "SIGNEXTEND", (a, b) => signExtend(a, b));
 export const LT = twoArgsMathCodeGenerator(0x10n, "LT", (a, b) => (a < b ? 1n : 0n));
 export const GT = twoArgsMathCodeGenerator(0x11n, "GT", (a, b) => (a > b ? 1n : 0n));
-export const SLT = twoArgsMathCodeGenerator(0x12n, "SLT", (a, b) => (i256Tou256(a) < i256Tou256(b) ? 1n : 0n));
-export const SGT = twoArgsMathCodeGenerator(0x13n, "SGT", (a, b) => (i256Tou256(a) > i256Tou256(b) ? 1n : 0n));
+export const SLT = twoArgsMathCodeGenerator(0x12n, "SLT", (a, b) => (i256ToBigint(a) < i256ToBigint(b) ? 1n : 0n));
+export const SGT = twoArgsMathCodeGenerator(0x13n, "SGT", (a, b) => (i256ToBigint(a) > i256ToBigint(b) ? 1n : 0n));
 export const EQ = twoArgsMathCodeGenerator(0x14n, "EQ", (a, b) => (a === b ? 1n : 0n));
 
 export const IZERO = oneArgMathCodeGenerator(0x15n, "ISZERO", (a) => (a === 0n ? 1n : 0n));
@@ -113,7 +113,7 @@ export const BYTE = twoArgsMathCodeGenerator(0x1an, "BYTE", (a, b) =>
 
 export const SHL = twoArgsMathCodeGenerator(0x1bn, "SHL", (a, b) => ethMod(b << a));
 export const SHR = twoArgsMathCodeGenerator(0x1cn, "SHR", (a, b) => ethMod(b >> a));
-export const SAR = twoArgsMathCodeGenerator(0x1dn, "SAR", (a, b) => i256Tou256(i256Div(b, 2n ** a)));
+export const SAR = twoArgsMathCodeGenerator(0x1dn, "SAR", (a, b) => i256Div(b, 2n ** a));
 
 export class SHA3 extends OPCode {
   constructor() {
@@ -154,7 +154,7 @@ export class BALANCE extends OPCode {
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
     const address = ctx.stack.pop()!;
-    const balance = await loader.getBalance(ctx.blocknumber - 1n, address);
+    const balance = ctx.balances.get(address) ?? (await loader.getBalance(ctx.blocknumber - 1n, address));
     ctx.stack.push(balance);
     return { ...ctx, pc: ctx.pc + 1 };
   }
@@ -439,7 +439,8 @@ export class SELFBALANCE extends OPCode {
   }
 
   async execute(ctx: ContractContext, loader: Loader): Promise<InteractedContext> {
-    const balance = await loader.getBalance(ctx.blocknumber - 1n, ctx.to);
+    const balance = ctx.balances.get(ctx.to) ?? (await loader.getBalance(ctx.blocknumber - 1n, ctx.to));
+
     ctx.stack.push(balance);
     return { ...ctx, pc: ctx.pc + 1 };
   }

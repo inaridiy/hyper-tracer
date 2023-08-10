@@ -8,26 +8,25 @@ export const ethMod = (a: bigint): bigint => {
   return (a + TWO_256) % TWO_256;
 };
 
-export const u256Toi256 = (a: bigint): bigint => {
-  return a >= TWO_256 / 2n ? a - TWO_256 : a;
+export const i256ToBigint = (a: bigint): bigint => {
+  if (a & (1n << 255n)) {
+    return a - (1n << 256n);
+  }
+  return a;
 };
 
-export const i256Tou256 = (a: bigint): bigint => {
-  return a < 0n ? a + TWO_256 : a;
+export const bigintToi256 = (a: bigint): bigint => {
+  return a & ((1n << 256n) - 1n);
 };
 
 export const i256Div = (a: bigint, b: bigint): bigint => {
   if (b === 0n) return 0n;
-  const sign = a < 0n !== b < 0n;
-  const result = ethMod(a) / ethMod(b);
-  return sign ? -result : result;
+  return bigintToi256(i256ToBigint(a) / i256ToBigint(b));
 };
 
 export const i256Mod = (a: bigint, b: bigint): bigint => {
   if (b === 0n) return 0n;
-  const sign = a < 0n;
-  const result = ethMod(a) % ethMod(b);
-  return sign ? -result : result;
+  return bigintToi256(i256ToBigint(a) % i256ToBigint(b));
 };
 
 export const signExtend = (a: bigint, b: bigint): bigint => {
