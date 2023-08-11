@@ -165,8 +165,9 @@ export class ORIGIN extends OPCode {
     super(0x32n, "ORIGIN");
   }
 
-  async execute(_ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
-    throw new Error("Not implemented");
+  async execute(ctx: ContractContext, _loader: Loader): Promise<InteractedContext> {
+    ctx.stack.push(ctx.origin);
+    return Promise.resolve({ ...ctx, pc: ctx.pc + 1 });
   }
 }
 

@@ -18,6 +18,7 @@ export const normalizeTransaction = (tx: Partial<VisualTransaction>): Omit<Trans
   return {
     from: normalizeAddress(tx.from),
     to: normalizeAddress(tx.to),
+    origin: normalizeAddress(tx.from),
     value: tx.value || 0n,
     calldata: normalizeHex(tx.calldata),
   };

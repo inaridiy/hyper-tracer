@@ -46,6 +46,7 @@ export class JSONRpcLoader implements Loader {
     return {
       from: BigInt(res.from),
       to: BigInt(res.to),
+      origin: BigInt(res.from),
       value: BigInt(res.value),
       calldata: Uint8Array.from(Buffer.from(res.input.slice(2), "hex")),
       blocknumber: BigInt(res.blockNumber),
@@ -105,6 +106,7 @@ export class EmptyLoader implements Loader {
     return {
       from: 0n,
       to: 0n,
+      origin: 0n,
       value: 0n,
       calldata: new Uint8Array(),
       blocknumber: 0n,

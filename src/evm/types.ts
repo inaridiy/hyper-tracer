@@ -24,6 +24,7 @@ export interface VisualTransaction {
 export interface Transaction {
   from: Address;
   to: Address;
+  origin: Address;
   value: bigint;
   calldata: Calldata;
   nonce: bigint;
@@ -81,3 +82,43 @@ export interface ExecutionResult {
   return?: Uint8Array;
   revert?: Uint8Array;
 }
+
+export interface OPCodeStartTrace {
+  type: "opcode-start";
+  pc: number;
+  opcode: { name: string; code: number };
+  stack: Stack;
+  memory: Memory;
+}
+
+export interface OPCodeResultTrace {
+  type: "opcode-result";
+  log?: { data: Uint8Array; topics: bigint[] };
+  return?: Uint8Array;
+  revert?: Uint8Array;
+  selfdestruct?: Address;
+  storageDiff: Storage;
+}
+
+export interface FrameStartTrace {
+  type: "frame-start";
+  txType: TransactionType;
+  depth: number;
+  calldata: Calldata;
+  from: Address;
+  to: Address;
+  origin: Address;
+  value: bigint;
+  storage: Storage;
+  balances: Map<Address, bigint>;
+}
+
+export interface FrameResultTrace {
+  type: "frame-result";
+  return?: Uint8Array;
+  revert?: Uint8Array;
+  storageDiff: Storage;
+  balancesDiff: Map<Address, bigint>;
+}
+
+export type Trace = OPCodeStartTrace | OPCodeResultTrace | FrameStartTrace | FrameResultTrace;

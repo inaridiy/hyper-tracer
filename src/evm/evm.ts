@@ -9,6 +9,12 @@ import {
   Transaction,
   ExecutionResult,
   TransactionType,
+  Trace,
+  FrameStartTrace,
+  FrameResultTrace,
+  OPCodeStartTrace,
+  InteractedContext,
+  OPCodeResultTrace,
 } from "./types";
 import { EmptyLoader, JSONRpcLoader, Loader } from "./loader";
 import { insertIntoArray } from "../utils/bytes";
@@ -42,6 +48,8 @@ export class EVMExecutor {
   private nonces: Map<Address, bigint>;
   private balances: Map<Address, bigint>;
   private storage: Map<Address, Storage>; //<Address, Storage>
+
+  private trace: Trace[] = [];
 
   constructor(options: EVMOpts) {
     this.chainId = options.chainId || 1n;
@@ -88,14 +96,6 @@ export class EVMExecutor {
     return frame;
   }
 
-  private _cloneFrame(frame: ContractFrame): ContractFrame {
-    const clone = {
-      ...frame,
-      ...{ stack: [...frame.stack], memory: new Uint8Array(frame.memory) },
-    } satisfies ContractFrame;
-    return clone;
-  }
-
   private _cloneStorage(address: Address): Storage {
     const storage = new Map(Array.from(this.storage.get(address) || new Map()).map(([k, v]) => [k, v]));
     return storage;
@@ -104,6 +104,22 @@ export class EVMExecutor {
   private _cloneBalances(): Map<Address, bigint> {
     const balances = new Map(Array.from(this.balances).map(([k, v]) => [k, v]));
     return balances;
+  }
+
+  private _storageDiff(before: Storage, after: Storage): Storage {
+    const diff = new Map();
+    for (const [k, v] of after) {
+      if (before.get(k) !== v) diff.set(k, v);
+    }
+    return diff;
+  }
+
+  private _balancesDiff(before: Map<Address, bigint>, after: Map<Address, bigint>): Map<Address, bigint> {
+    const diff = new Map();
+    for (const [k, v] of after) {
+      if (before.get(k) !== v) diff.set(k, v);
+    }
+    return diff;
   }
 
   private _createContext(frame: ContractFrame): ContractContext {
@@ -118,23 +134,87 @@ export class EVMExecutor {
     return context;
   }
 
-  async execute(tx: Partial<VisualTransaction & { blocknumber: bigint }>): Promise<ExecutionResult> {
+  private _insertOpCodeStartTrace(frame: ContractFrame, opcode: OPCode) {
+    const trace = {
+      type: "opcode-start",
+      opcode: { name: opcode.name, code: Number(opcode.code) },
+      pc: frame.pc,
+      stack: frame.stack,
+      memory: frame.memory,
+    } satisfies OPCodeStartTrace;
+    this.trace.push(trace);
+  }
+
+  private _insertOpCodeResultTrace(result: InteractedContext, storageSnapshot: Storage) {
+    const trace = {
+      type: "opcode-result",
+      log: result.log,
+      return: result.return,
+      revert: result.revert,
+      selfdestruct: result.selfdestruct,
+      storageDiff: this._storageDiff(storageSnapshot, result.storage),
+    } satisfies OPCodeResultTrace;
+    this.trace.push(trace);
+  }
+
+  private _insertFrameStartTrace(frame: ContractFrame) {
+    const storageSnapshot = this._cloneStorage(frame.to);
+    const balanceSnapshot = this._cloneBalances();
+
+    const trace: FrameStartTrace = {
+      type: "frame-start",
+      txType: frame.type,
+      depth: frame.depth,
+      from: frame.from,
+      to: frame.to,
+      origin: frame.origin,
+      calldata: frame.calldata,
+      value: frame.value,
+      storage: storageSnapshot,
+      balances: balanceSnapshot,
+    };
+    this.trace.push(trace);
+  }
+
+  private _insertFrameResultTrace(
+    frame: ContractFrame,
+    result: ExecutionResult,
+    storageSnapshot: Storage,
+    balanceSnapshot: Map<Address, bigint>
+  ) {
+    const storageDiff = this._storageDiff(storageSnapshot, this.storage.get(frame.to) || new Map());
+    const balancesDiff = this._balancesDiff(balanceSnapshot, this.balances);
+
+    const trace = {
+      type: "frame-result",
+      return: result.return,
+      revert: result.revert,
+      storageDiff,
+      balancesDiff,
+    } satisfies FrameResultTrace;
+    this.trace.push(trace);
+  }
+
+  async execute(tx: Partial<VisualTransaction & { blocknumber: bigint }>) {
     if (tx.blocknumber) this.blocknumber = tx.blocknumber;
     const transaction = normalizeTransaction(tx) as Transaction;
     transaction.nonce = await this.getTransactionCount(transaction.from);
-    if (!transaction.to) {
-      await this._executeCreation(transaction);
-      return {};
-    } else {
-      const code = await this.getCode(transaction.to);
-      const frame = await this._createFrame(transaction, { depth: 0, code, type: "call" });
-      return await this._executeFrame(frame);
-    }
+    await this._execute(transaction);
+
+    return { traces: this.trace };
   }
 
-  async executeFromHash(hash: bigint): Promise<ExecutionResult> {
+  async executeFromHash(hash: bigint) {
     const transaction = await this.loader.getTransactionByHash(hash);
     if (transaction.blocknumber) this.blocknumber = transaction.blocknumber;
+    await this._execute(transaction);
+
+    return { traces: this.trace };
+  }
+
+  private async _execute(tx: Transaction): Promise<ExecutionResult> {
+    this.trace = [];
+    const transaction = normalizeTransaction(tx) as Transaction;
     if (!transaction.to) {
       await this._executeCreation(transaction);
       return {};
@@ -154,8 +234,6 @@ export class EVMExecutor {
     let storageSnapshot: Storage = this._cloneStorage(frame.to);
     let balanceSnapshot: Map<Address, bigint> = this._cloneBalances();
 
-    console.log(frame.type, ":", frame.to.toString(16), ":", frame.value, uint8ArrayToHex(frame.calldata));
-
     if (frame.type === "call") {
       const oldFromBalance = await this.getBalance(frame.from);
       const oldToBalance = await this.getBalance(frame.to);
@@ -167,9 +245,18 @@ export class EVMExecutor {
       this._setBalance(frame.to, oldToBalance + frame.value);
     }
 
+    this._insertFrameStartTrace(frame);
+
     const precompiled = this.precompiled.get(frame.to);
-    if (frame.code.length === 0 && !precompiled) return {};
-    if (precompiled) return await precompiled.call(await this._createContext(frame), this.loader);
+    if (precompiled) {
+      const result = await precompiled.call(await this._createContext(frame), this.loader);
+      this._insertFrameResultTrace(frame, result, storageSnapshot, balanceSnapshot);
+      return result;
+    }
+    if (frame.code.length === 0 && !precompiled) {
+      this._insertFrameResultTrace(frame, {}, storageSnapshot, balanceSnapshot);
+      return {};
+    }
 
     while (true) {
       if (frame.pc >= frame.code.length) throw new Error("Invalid pc");
@@ -177,31 +264,22 @@ export class EVMExecutor {
       const opcode = this.opcodes.get(frame.code[frame.pc]);
       if (!opcode) throw new Error(`Invalid opcode: ${frame.code[frame.pc].toString(16)}`);
 
-      console.log(
-        "depth:",
-        frame.depth + 1,
-        frame.pc.toString(10),
-        ":",
-        opcode.name,
-        "[",
-        frame.stack.map((n) => n.toString(16)).join(","),
-        "]"
-      );
+      this._insertOpCodeStartTrace(frame, opcode);
       const context = this._createContext(frame);
       const interacted = await opcode.execute(context, this.loader);
 
-      frame = this._cloneFrame(frame);
       frame.pc = interacted.pc;
       frame.stack = interacted.stack;
       frame.memory = interacted.memory;
       this.storage.set(frame.to, interacted.storage);
+      this._insertOpCodeResultTrace(interacted, storageSnapshot);
 
       if (interacted.call && interacted.call.type === "call") {
         // if (frame.type === "staticcall") throw new Error("Cannot call in staticcall");
         const call = interacted.call;
         const code = await this.getCode(interacted.call.to);
         const transaction = {
-          ...{ from: frame.to, to: call.to, value: call.value, calldata: call.calldata },
+          ...{ from: frame.to, to: call.to, origin: frame.origin, value: call.value, calldata: call.calldata },
           nonce: await this.getTransactionCount(frame.to),
         } satisfies Transaction;
         const childFrame = await this._createFrame(transaction, {
@@ -227,7 +305,7 @@ export class EVMExecutor {
         const initCode = call.calldata.slice(0, initCodeEnd + 1);
         const code = call.calldata.slice(initCodeEnd + 1);
         const transaction = {
-          ...{ from: frame.to, to: call.to, value: call.value, calldata: initCode },
+          ...{ from: frame.to, to: call.to, origin: frame.origin, value: call.value, calldata: initCode },
           nonce: await this.getTransactionCount(frame.to),
         } satisfies Transaction;
         this.codes.set(transaction.to, code);
@@ -246,7 +324,7 @@ export class EVMExecutor {
         const call = interacted.call;
         const code = await this.getCode(call.to);
         const transaction = {
-          ...{ from: frame.from, to: frame.to, value: call.value, calldata: call.calldata },
+          ...{ from: frame.from, to: frame.to, origin: frame.origin, value: call.value, calldata: call.calldata },
           nonce: await this.getTransactionCount(frame.to),
         } satisfies Transaction;
         const childFrame = await this._createFrame(transaction, {
@@ -270,7 +348,7 @@ export class EVMExecutor {
         const call = interacted.call;
         const code = await this.getCode(interacted.call.to);
         const transaction = {
-          ...{ from: frame.to, to: call.to, value: 0n, calldata: call.calldata },
+          ...{ from: frame.to, to: call.to, origin: frame.origin, value: 0n, calldata: call.calldata },
           nonce: await this.getTransactionCount(frame.to),
         } satisfies Transaction;
         const childFrame = await this._createFrame(transaction, {
@@ -299,7 +377,6 @@ export class EVMExecutor {
       }
 
       if (interacted.log) {
-        console.log("log:", frame.to.toString(16), ":");
         // console.log(interacted.log);
       }
 
@@ -307,10 +384,12 @@ export class EVMExecutor {
         console.log("revert:", frame.to.toString(16), ":");
         this.storage.set(frame.to, storageSnapshot);
         this.balances = balanceSnapshot;
+        this._insertFrameResultTrace(frame, { revert: interacted.revert }, storageSnapshot, balanceSnapshot);
         return { revert: interacted.revert };
       }
       if (interacted.return) {
-        this.nonces.set(frame.from, frame.nonce + 1n);
+        this.nonces.set(frame.from, (frame.nonce || 0n) + 1n);
+        this._insertFrameResultTrace(frame, { return: interacted.return }, storageSnapshot, balanceSnapshot);
         return { return: interacted.return };
       }
     }

@@ -13,3 +13,7 @@ export const hexToUint8Array = (hex: string): Uint8Array => {
 export const uint8ArrayToHex = (uint8Array: Uint8Array): string => {
   return "0x" + Buffer.from(uint8Array).toString("hex");
 };
+
+export const bigintToAddressString = (bigint: bigint): string => {
+  return "0x" + bigint.toString(16).padStart(40, "0");
+};

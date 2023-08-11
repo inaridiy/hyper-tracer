@@ -11,7 +11,6 @@ export class MEMCOPY implements PrecompiledContracts {
   address = 0x4n;
 
   call(context: ContractContext, _loader: Loader): Promise<ExecutionResult> {
-    console.log("MEMCOPY");
     return Promise.resolve({ return: new Uint8Array(context.calldata) });
   }
 }
