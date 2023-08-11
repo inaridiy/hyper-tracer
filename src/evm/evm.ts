@@ -20,7 +20,6 @@ import { EmptyLoader, JSONRpcLoader, Loader } from "./loader";
 import { insertIntoArray } from "../utils/bytes";
 import { PRESET_OPCODES, PRESET_PRECOMPILED_CONTRACTS } from "./preset";
 import { OPCode } from "./opcodes";
-import { uint8ArrayToHex } from "../utils/converter";
 import { PrecompiledContracts } from "./precompiled";
 
 export interface EVMOpts {
@@ -139,8 +138,8 @@ export class EVMExecutor {
       type: "opcode-start",
       opcode: { name: opcode.name, code: Number(opcode.code) },
       pc: frame.pc,
-      stack: frame.stack,
-      memory: frame.memory,
+      stack: frame.stack.slice(),
+      memory: frame.memory.slice(),
     } satisfies OPCodeStartTrace;
     this.trace.push(trace);
   }
@@ -289,12 +288,12 @@ export class EVMExecutor {
         });
         const childResult = await this._executeFrame(childFrame);
         frame.stack.push(childResult.revert ? 0n : 1n); // set success flag
-        frame.returnedData = childResult.return;
-        if (childResult.return)
+        frame.returnedData = childResult.return || childResult.revert;
+        if (childResult.return || childResult.revert)
           frame.memory = insertIntoArray(
             frame.memory,
             call.returnOffset,
-            new Uint8Array(childResult.return!, call.returnSize)
+            new Uint8Array(childResult.return! || childResult.revert!, call.returnSize)
           );
       }
 
@@ -335,12 +334,12 @@ export class EVMExecutor {
         // console.log(call, childFrame);
         const childResult = await this._executeFrame(childFrame);
         frame.stack.push(childResult.revert ? 0n : 1n); // set success flag
-        frame.returnedData = childResult.return;
-        if (childResult.return)
+        frame.returnedData = childResult.return || childResult.revert;
+        if (childResult.return || childResult.revert)
           frame.memory = insertIntoArray(
             frame.memory,
             call.returnOffset,
-            new Uint8Array(childResult.return!, call.returnSize)
+            new Uint8Array(childResult.return! || childResult.revert!, call.returnSize)
           );
       }
 
@@ -367,12 +366,12 @@ export class EVMExecutor {
         if (!isStorageUnchanged) throw new Error("Cannot modify storage in staticcall");
 
         frame.stack.push(childResult.revert ? 0n : 1n); // set success flag
-        frame.returnedData = childResult.return;
-        if (childResult.return)
+        frame.returnedData = childResult.return || childResult.revert;
+        if (childResult.return || childResult.revert)
           frame.memory = insertIntoArray(
             frame.memory,
             call.returnOffset,
-            new Uint8Array(childResult.return!, call.returnSize)
+            new Uint8Array(childResult.return! || childResult.revert!, call.returnSize)
           );
       }
 
