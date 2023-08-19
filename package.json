@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "chalk": "^5.3.0",
+    "dotenv": "^16.3.1",
     "viem": "^1.5.4"
   }
 }

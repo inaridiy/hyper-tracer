@@ -17,3 +17,7 @@ export const uint8ArrayToHex = (uint8Array: Uint8Array): string => {
 export const bigintToAddressString = (bigint: bigint): string => {
   return "0x" + bigint.toString(16).padStart(40, "0");
 };
+
+export const bigintToBytes32String = (bigint: bigint): string => {
+  return "0x" + bigint.toString(16).padStart(64, "0");
+};
